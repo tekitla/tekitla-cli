@@ -7,7 +7,7 @@ issues desde la terminal (Go).
 
 Descarga el binario de tu sistema desde
 [Releases](https://github.com/tekitla/tekitla-cli/releases) y ponlo en el
-`PATH`. Desde el código: `make build` (deja `bin/tk`).
+`PATH`. Desde el código: `make build` (deja `bin/tk`; en Windows, `bin\tk.exe`).
 
 ## Uso
 

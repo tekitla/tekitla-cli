@@ -9,7 +9,7 @@ Issue: issue-N  <!-- carpeta contenido/issues/N-…/ del repo de docs; obligator
 - [ ] `make lint`
 - [ ] `make test`
 - [ ] `make vuln`
-- [ ] Probado a mano con `make build` + `bin/tk …` (comandos tocados) / no aplica
+- [ ] Probado a mano con `make build` + `bin/tk …` (`bin\tk.exe` en Windows) (comandos tocados) / no aplica
 
 ## Checklist
 

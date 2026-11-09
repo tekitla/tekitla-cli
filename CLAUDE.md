@@ -48,13 +48,14 @@ desde la terminal y desde las sesiones de Claude. Go
 ## Comandos de desarrollo
 
 ```sh
-make build   # bin/tk
+make build   # bin/tk (bin\tk.exe en Windows)
 make test
 make lint    # gofmt + vet + golangci-lint (v2.15.0)
 make vuln    # govulncheck
 ```
 
-Contra un gateway local: `TK_API_URL=http://localhost:8080 bin/tk proyectos`.
+Contra un gateway local: `TK_API_URL=http://localhost:8080 bin/tk proyectos`
+(en PowerShell: `$env:TK_API_URL = "http://localhost:8080"; .\bin\tk.exe proyectos`).
 
 ## Usar tk desde una sesión de Claude
 

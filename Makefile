@@ -1,6 +1,6 @@
 # tekitla-cli: CLI tk de Tekitla.
 #
-#   make build   binario en bin/tk
+#   make build   binario en bin/tk (bin/tk.exe en Windows)
 #   make test    tests (sin red: servidor HTTP falso)
 #   make lint    gofmt + go vet + golangci-lint
 #   make vuln    govulncheck
@@ -10,7 +10,8 @@
 GOLANGCI_VERSION ?= v2.15.0
 GOVULNCHECK_VERSION ?= v1.1.4
 
-BIN := bin/tk
+# GOEXE: ".exe" en Windows, vacío en el resto.
+BIN := bin/tk$(shell go env GOEXE)
 LDFLAGS := -s -w -X github.com/tekitla/tekitla-cli/internal/cli.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 .PHONY: help build test lint vuln fmt tidy clean
@@ -19,7 +20,7 @@ LDFLAGS := -s -w -X github.com/tekitla/tekitla-cli/internal/cli.Version=$(shell 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'
 
-## build: compila bin/tk
+## build: compila bin/tk (bin/tk.exe en Windows)
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/tk
 
