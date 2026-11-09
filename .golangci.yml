@@ -1,0 +1,38 @@
+# golangci-lint v2. Linters por defecto (errcheck, govet, ineffassign,
+# staticcheck, unused) más algunos de seguridad y estilo.
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - noctx
+    - revive
+    - unconvert
+  settings:
+    errcheck:
+      # Escribir en stdout/stderr: si falla no hay a quién avisarle.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+    gosec:
+      excludes:
+        # G204: exec.Command con la URL de verificación de Google (abrir el
+        # navegador); no viene del usuario.
+        - G204
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose]
+
+formatters:
+  enable:
+    - gofmt

@@ -1,0 +1,49 @@
+# Release de tk: un tag vX.Y.Z publica los binarios de Windows, macOS y Linux
+# en GitHub Releases con GoReleaser (CU-029-8).
+#
+# El cliente OAuth de Google («TVs y dispositivos de entrada limitada», proyecto
+# de GCP tekitla-app) se compila en el binario con -ldflags. En Settings >
+# Secrets and variables > Actions, NUNCA en este archivo:
+#   Variable: TK_OAUTH_CLIENT_ID
+#   Secret:   TK_OAUTH_CLIENT_SECRET   (no es un secreto real, ADR 0005, pero
+#                                      tampoco va al repo)
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # crear el release y subir los binarios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test ./... -count=1 -timeout=120s
+      - name: Cliente OAuth configurado
+        env:
+          TK_OAUTH_CLIENT_ID: ${{ vars.TK_OAUTH_CLIENT_ID }}
+          TK_OAUTH_CLIENT_SECRET: ${{ secrets.TK_OAUTH_CLIENT_SECRET }}
+        run: |
+          if [ -z "$TK_OAUTH_CLIENT_ID" ] || [ -z "$TK_OAUTH_CLIENT_SECRET" ]; then
+            echo "Faltan TK_OAUTH_CLIENT_ID (variable) o TK_OAUTH_CLIENT_SECRET (secret): tk login no funcionaría."
+            exit 1
+          fi
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TK_OAUTH_CLIENT_ID: ${{ vars.TK_OAUTH_CLIENT_ID }}
+          TK_OAUTH_CLIENT_SECRET: ${{ secrets.TK_OAUTH_CLIENT_SECRET }}
