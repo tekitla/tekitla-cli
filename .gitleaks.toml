@@ -1,0 +1,30 @@
+# Configuración de gitleaks (base común de dev-plantillas: no editar acá, se
+# actualiza con `copier update`). Usa las reglas por defecto de gitleaks.
+#
+# Falsos positivos puntuales: agregar el fingerprint del hallazgo a
+# .gitleaksignore (un archivo propio del repo), explicando por qué en el MR/PR.
+# Un secreto real no se ignora: se rota (SECURITY.md).
+title = "gitleaks (base común)"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Archivos de lock y sumas de dependencias (hashes, no secretos)"
+paths = [
+  '''(^|/)go\.sum$''',
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)gradle/verification-metadata\.xml$''',
+]
+
+# La apiKey web de Firebase («AIza…») no es secreta: es la misma que viaja en
+# el bundle del panel (tekitla-web) y la protegen las restricciones de la clave
+# y la allowlist del gateway. Sólo las reglas de claves de API y sólo en
+# internal/config/publico.go: una clave en cualquier otro archivo se sigue
+# detectando.
+[[allowlists]]
+description = "Config pública de Firebase de tk (internal/config/publico.go)"
+targetRules = ["gcp-api-key", "generic-api-key"]
+paths = [
+  '''(^|/)internal/config/publico\.go$''',
+]

@@ -1,0 +1,56 @@
+# GoReleaser v2: binarios de tk para Windows, macOS y Linux (amd64 y arm64).
+# Lo corre .github/workflows/release.yml con un tag vX.Y.Z; en el CI de cada PR
+# se compila con --snapshot, sin publicar.
+version: 2
+
+project_name: tk
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: tk
+    main: ./cmd/tk
+    binary: tk
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/tekitla/tekitla-cli/internal/cli.Version={{ .Version }}
+      - -X github.com/tekitla/tekitla-cli/internal/cli.Commit={{ .ShortCommit }}
+      - -X github.com/tekitla/tekitla-cli/internal/cli.Fecha={{ .Date }}
+      # Cliente OAuth del device flow: variables del CI (release.yml). Vacío en
+      # un snapshot: se configura en config.toml.
+      - -X github.com/tekitla/tekitla-cli/internal/config.OAuthClientID={{ index .Env "TK_OAUTH_CLIENT_ID" }}
+      - -X github.com/tekitla/tekitla-cli/internal/config.OAuthClientSecret={{ index .Env "TK_OAUTH_CLIENT_SECRET" }}
+
+archives:
+  - id: tk
+    name_template: "tk_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^wip"
+
+release:
+  github:
+    owner: tekitla
+    name: tekitla-cli
