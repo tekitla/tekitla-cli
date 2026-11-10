@@ -78,6 +78,11 @@ func TestAgenteYTokenNuevo(t *testing.T) {
 	if strings.Count(r.out, secretoToken) != 1 {
 		t.Fatalf("el token sale más de una vez:\n%s", r.out)
 	}
+	// --vence 90d se manda con un margen por el reloj del servicio.
+	r = a.correr("token", "nuevo", "--agente", "Claude Code PC-01", "--permiso", "issues:read", "--vence", "90d", "--json")
+	if nt := decodificar[tokenNuevoJSON](t, r.out); nt.Token.Vence != "2027-02-07T11:50:00Z" {
+		t.Fatalf("--vence 90d: vence %s, se esperaba 90d menos el margen", nt.Token.Vence)
+	}
 
 	// tk tokens: lista sin el valor.
 	for _, args := range [][]string{{"tokens", "--json"}, {"tokens"}, {"tokens", "--todos", "--json"}} {
@@ -87,7 +92,7 @@ func TestAgenteYTokenNuevo(t *testing.T) {
 		}
 	}
 	toks := decodificar[[]tokenJSON](t, a.correr("tokens", "--json").out)
-	if len(toks) != 3 || toks[0].Agente != "Claude Code PC-01" || toks[0].Estado != "activo" || toks[2].Agente != "Codex PC-01" || toks[2].UltimoUso == "" {
+	if len(toks) != 4 || toks[0].Agente != "Claude Code PC-01" || toks[0].Estado != "activo" || toks[3].Agente != "Codex PC-01" || toks[3].UltimoUso == "" {
 		t.Fatalf("tokens = %+v", toks)
 	}
 
@@ -121,6 +126,11 @@ func TestTokenNuevoErrores(t *testing.T) {
 		"herramienta mala":   {[]string{"agente", "nuevo", "X", "--herramienta", "vim"}, "claude-code"},
 		"revocar con valor":  {[]string{"token", "revocar", secretoToken}, "id del token"},
 		"sin subcomando":     {[]string{"token"}, "subcomando"},
+		"vence desborda":     {[]string{"token", "nuevo", "--agente", "Codex PC-01", "--permiso", "issues:read", "--vence", "106752d"}, "90d"},
+		"vence cero":         {[]string{"token", "nuevo", "--agente", "Codex PC-01", "--permiso", "issues:read", "--vence", "0h"}, "1h"},
+		"token como agente":  {[]string{"token", "nuevo", "--agente", secretoToken, "--permiso", "issues:read"}, "parece el valor"},
+		"revocar agente tka": {[]string{"agente", "revocar", secretoToken}, "parece el valor"},
+		"agente nuevo tka":   {[]string{"agente", "nuevo", secretoToken, "--herramienta", "codex"}, "parece el valor"},
 	} {
 		r := a.correr(c.args...)
 		if r.codigo != 1 || !strings.Contains(r.err, c.want) {
@@ -158,7 +168,7 @@ func TestRevocar(t *testing.T) {
 	if r.codigo != 0 {
 		t.Fatalf("token revocar: %d %s", r.codigo, r.err)
 	}
-	if tj := decodificar[tokenJSON](t, r.out); tj.Estado != "revocado" || tj.Revocado == "" {
+	if tj := decodificar[tokenJSON](t, r.out); tj.Estado != "revocado" || tj.Revocado == "" || tj.Agente != "Codex PC-01" {
 		t.Fatalf("token = %+v", tj)
 	}
 	if r := a.correr("token", "revocar", "t-nada"); r.codigo != 1 || !strings.Contains(r.err, "NOT_FOUND") {

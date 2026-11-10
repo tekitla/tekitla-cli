@@ -21,8 +21,11 @@ import (
 )
 
 const (
-	venceDefault = 30 * 24 * time.Hour
-	venceMaximo  = 90 * 24 * time.Hour
+	venceMaximo = 90 * 24 * time.Hour
+	// margenReloj: el servicio valida "a 90 días como máximo" con su reloj;
+	// --vence 90d se manda un poco antes para que un reloj local adelantado
+	// no lo haga fallar.
+	margenReloj = 10 * time.Minute
 )
 
 var herramientas = map[string]string{
@@ -38,7 +41,7 @@ func herramienta(t string) string {
 			return k
 		}
 	}
-	return ""
+	return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(t, "AGENT_TOOL_")), "_", "-")
 }
 
 var permisos = map[string]string{
@@ -76,6 +79,8 @@ type tokenJSON struct {
 	UltimoUso string   `json:"ultimo_uso,omitempty"`
 	Revocado  string   `json:"revocado,omitempty"`
 	Estado    string   `json:"estado"` // activo, vencido o revocado
+	// EsPersona: el token es de la persona misma, no de un agente.
+	EsPersona bool `json:"es_persona"`
 }
 
 type tokenNuevoJSON struct {
@@ -108,7 +113,7 @@ func (a *app) tokenDe(t api.Token, nombres map[string]string) tokenJSON {
 	switch {
 	case t.RevokedAt != nil:
 		j.Estado = "revocado"
-	case !t.ExpiresAt.After(a.ahora()):
+	case !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(a.ahora()):
 		j.Estado = "vencido"
 	default:
 		j.Estado = "activo"
@@ -123,22 +128,33 @@ func (a *app) ahora() time.Time {
 	return time.Now()
 }
 
-// nombresActores: id -> nombre para mostrar (la persona sale como "(tú)").
-func nombresActores(actores []api.Actor) map[string]string {
+// nombresActores: id -> nombre (el display_name; el de la persona puede
+// venir vacío). La tabla de tk tokens muestra "(tú)" para la persona; el
+// JSON lleva el nombre tal cual y es_persona.
+func nombresActores(actores []api.Actor) (map[string]string, map[string]bool) {
 	m := make(map[string]string, len(actores))
+	personas := map[string]bool{}
 	for _, ac := range actores {
-		n := ac.DisplayName
+		m[ac.ID] = ac.DisplayName
 		if ac.Kind == "ACTOR_KIND_PERSON" {
-			n = "(tú)"
+			personas[ac.ID] = true
 		}
-		m[ac.ID] = n
 	}
-	return m
+	return m, personas
 }
+
+// pareceToken: el valor de un tka_ pegado donde va un nombre o un id. Se
+// rechaza sin repetirlo en el error.
+func pareceToken(s string) bool { return strings.HasPrefix(strings.TrimSpace(s), "tka_") }
+
+var errPareceToken = usoErr("eso parece el valor de un token tka_, no un nombre ni un id: no lo pegues en comandos (queda en el historial); si se filtró, revócalo")
 
 // agentePorNombre busca un agente vigente por nombre (sin distinguir
 // mayúsculas, acentos ni espacios de más).
 func (a *app) agentePorNombre(ctx context.Context, nombre string) (api.Actor, error) {
+	if pareceToken(nombre) {
+		return api.Actor{}, errPareceToken
+	}
 	actores, err := a.api().ListarActores(ctx, false)
 	if err != nil {
 		return api.Actor{}, err
@@ -162,26 +178,22 @@ func (a *app) agentePorNombre(ctx context.Context, nombre string) (api.Actor, er
 // parsearVence acepta "30d" o "12h"; entre 1 h y 90 días.
 func parsearVence(s string) (time.Duration, error) {
 	s = strings.TrimSpace(strings.ToLower(s))
-	var d time.Duration
-	if n, ok := strings.CutSuffix(s, "d"); ok {
-		v, err := strconv.Atoi(n)
-		if err != nil {
-			return 0, usoErr("--vence %q: usa días u horas, p. ej. 30d o 12h", s)
-		}
-		d = time.Duration(v) * 24 * time.Hour
-	} else if n, ok := strings.CutSuffix(s, "h"); ok {
-		v, err := strconv.Atoi(n)
-		if err != nil {
-			return 0, usoErr("--vence %q: usa días u horas, p. ej. 30d o 12h", s)
-		}
-		d = time.Duration(v) * time.Hour
-	} else {
+	unidad := time.Duration(0)
+	n := s
+	if v, ok := strings.CutSuffix(s, "d"); ok {
+		n, unidad = v, 24*time.Hour
+	} else if v, ok := strings.CutSuffix(s, "h"); ok {
+		n, unidad = v, time.Hour
+	}
+	v, err := strconv.Atoi(n)
+	if unidad == 0 || err != nil {
 		return 0, usoErr("--vence %q: usa días u horas, p. ej. 30d o 12h", s)
 	}
-	if d < time.Hour || d > venceMaximo {
+	// Rango antes de multiplicar: un número enorme no puede desbordar.
+	if v < 1 || int64(v) > int64(venceMaximo/unidad) {
 		return 0, usoErr("--vence %q: entre 1h y 90d", s)
 	}
-	return d, nil
+	return time.Duration(v) * unidad, nil
 }
 
 // --- Comandos ----------------------------------------------------------------
@@ -245,6 +257,9 @@ func (a *app) cmdAgenteNuevo() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nombre := strings.TrimSpace(args[0])
+			if pareceToken(nombre) {
+				return errPareceToken
+			}
 			if nombre == "" || len([]rune(nombre)) > 80 {
 				return usoErr("el nombre del agente va de 1 a 80 caracteres")
 			}
@@ -314,10 +329,12 @@ func (a *app) cmdTokens() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nombres := nombresActores(actores)
+			nombres, personas := nombresActores(actores)
 			out := make([]tokenJSON, 0, len(toks))
 			for _, t := range toks {
-				out = append(out, a.tokenDe(t, nombres))
+				j := a.tokenDe(t, nombres)
+				j.EsPersona = personas[t.ActorID]
+				out = append(out, j)
 			}
 			if a.json {
 				escribirJSON(a.ent.Out, out)
@@ -329,7 +346,11 @@ func (a *app) cmdTokens() *cobra.Command {
 			}
 			filas := make([][]string, 0, len(out))
 			for _, t := range out {
-				filas = append(filas, []string{t.ID, t.Agente, strings.Join(t.Permisos, ","), t.Vence, t.Estado, t.UltimoUso})
+				agente := t.Agente
+				if t.EsPersona {
+					agente = "(tú)"
+				}
+				filas = append(filas, []string{t.ID, agente, strings.Join(t.Permisos, ","), t.Vence, t.Estado, t.UltimoUso})
 			}
 			tabla(a.ent.Out, []string{"ID", "AGENTE", "PERMISOS", "VENCE", "ESTADO", "ÚLTIMO USO"}, filas)
 			return nil
@@ -389,6 +410,9 @@ func (a *app) cmdTokenNuevo() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if d > venceMaximo-margenReloj {
+					d = venceMaximo - margenReloj
+				}
 				t := a.ahora().Add(d).UTC().Truncate(time.Second)
 				n.ExpiresAt = &t
 			}
@@ -436,14 +460,21 @@ func (a *app) cmdTokenRevocar() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
-			if id == "" || strings.HasPrefix(id, "tka_") {
+			if id == "" || pareceToken(id) {
 				return usoErr("usa el id del token (columna ID de tk tokens), no su valor")
 			}
-			tok, err := a.api().RevocarToken(cmd.Context(), id)
+			ctx := cmd.Context()
+			tok, err := a.api().RevocarToken(ctx, id)
 			if err != nil {
 				return err
 			}
-			j := a.tokenDe(tok, map[string]string{})
+			actores, err := a.api().ListarActores(ctx, true)
+			if err != nil {
+				return err
+			}
+			nombres, personas := nombresActores(actores)
+			j := a.tokenDe(tok, nombres)
+			j.EsPersona = personas[tok.ActorID]
 			if a.json {
 				escribirJSON(a.ent.Out, j)
 				return nil
