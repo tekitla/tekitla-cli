@@ -57,6 +57,8 @@ type falso struct {
 	etiquetas []map[string]any
 	issues    map[int]map[string]any
 	eventos   []map[string]any
+	actores   []map[string]any
+	tokens    []map[string]any
 	// errorAPI fuerza una respuesta de error en la API.
 	errorAPI *errorFalso
 	// rechazar401 responde 401 a la próxima llamada de la API.
@@ -97,7 +99,99 @@ func nuevoFalso(t *testing.T) *falso {
 		{"id": "e2", "actorId": "u1", "agentId": "", "createdAt": "2026-11-02T10:00:00Z",
 			"commented": map[string]any{"id": "c1", "body": "Primera línea\nsegunda", "authorId": "u1"}},
 	}
+	f.actores = []map[string]any{
+		{"id": "a-persona", "kind": "ACTOR_KIND_PERSON", "displayName": "", "userId": "u1", "createdAt": "2026-11-01T10:00:00Z"},
+		{"id": "a-codex", "kind": "ACTOR_KIND_AGENT", "displayName": "Codex PC-01", "ownerActorId": "a-persona",
+			"tool": "AGENT_TOOL_CODEX", "createdAt": "2026-11-02T10:00:00Z"},
+		{"id": "a-viejo", "kind": "ACTOR_KIND_AGENT", "displayName": "Viejo", "ownerActorId": "a-persona",
+			"tool": "AGENT_TOOL_OTHER", "createdAt": "2026-11-02T10:00:00Z", "revokedAt": "2026-11-03T10:00:00Z"},
+	}
+	f.tokens = []map[string]any{
+		{"id": "t-codex", "actorId": "a-codex", "name": "Codex PC-01", "scopes": []string{"TOKEN_SCOPE_ISSUES_READ"},
+			"createdAt": "2026-11-02T10:00:00Z", "expiresAt": "2026-12-02T10:00:00Z", "lastUsedAt": "2026-11-08T10:00:00Z"},
+	}
 	return f
+}
+
+// secretoToken es el valor en claro que devuelve el falso al crear un token:
+// tiene que salir una sola vez (tk token nuevo) y en ningún archivo.
+const secretoToken = "tka_VALOR-EN-CLARO-del-token-de-prueba-0000000"
+
+func revocado(m map[string]any) bool { _, ok := m["revokedAt"]; return ok }
+
+// actoresTokens atiende las rutas de ActorService. false: no es una de ellas.
+func (f *falso) actoresTokens(w http.ResponseWriter, r *http.Request, cuerpo []byte) bool {
+	ruta, accion, _ := strings.Cut(r.URL.Path, ":")
+	switch {
+	case ruta == "/v1/actors" && r.Method == http.MethodGet:
+		out := []map[string]any{}
+		for _, ac := range f.actores {
+			if !revocado(ac) || r.URL.Query().Get("includeRevoked") == "true" {
+				out = append(out, ac)
+			}
+		}
+		responder(w, 200, map[string]any{"actors": out})
+	case ruta == "/v1/agents" && r.Method == http.MethodPost:
+		var b map[string]any
+		_ = json.Unmarshal(cuerpo, &b)
+		for _, ac := range f.actores {
+			if !revocado(ac) && strings.EqualFold(fmt.Sprint(ac["displayName"]), fmt.Sprint(b["displayName"])) {
+				errorGateway(w, 409, "ALREADY_EXISTS", "ya hay un agente con ese nombre")
+				return true
+			}
+		}
+		ag := map[string]any{"id": fmt.Sprintf("a-%d", len(f.actores)+1), "kind": "ACTOR_KIND_AGENT",
+			"displayName": b["displayName"], "tool": b["tool"], "ownerActorId": "a-persona", "createdAt": "2026-11-09T12:00:00Z"}
+		f.actores = append(f.actores, ag)
+		responder(w, 200, map[string]any{"agent": ag})
+	case strings.HasPrefix(ruta, "/v1/actors/") && accion == "revoke" && r.Method == http.MethodPost:
+		id := strings.TrimPrefix(ruta, "/v1/actors/")
+		for _, ac := range f.actores {
+			if ac["id"] == id {
+				ac["revokedAt"] = "2026-11-09T12:00:00Z"
+				for _, t := range f.tokens {
+					if t["actorId"] == id {
+						t["revokedAt"] = "2026-11-09T12:00:00Z"
+					}
+				}
+				responder(w, 200, map[string]any{"actor": ac})
+				return true
+			}
+		}
+		errorGateway(w, 404, "NOT_FOUND", "actor no encontrado")
+	case ruta == "/v1/tokens" && r.Method == http.MethodPost:
+		var b map[string]any
+		_ = json.Unmarshal(cuerpo, &b)
+		vence, _ := b["expiresAt"].(string)
+		if vence == "" {
+			vence = "2026-12-09T12:00:00Z"
+		}
+		tok := map[string]any{"id": fmt.Sprintf("t-%d", len(f.tokens)+1), "actorId": b["actorId"], "name": b["name"],
+			"scopes": b["scopes"], "createdAt": "2026-11-09T12:00:00Z", "expiresAt": vence}
+		f.tokens = append(f.tokens, tok)
+		responder(w, 200, map[string]any{"token": tok, "secret": secretoToken})
+	case ruta == "/v1/tokens" && r.Method == http.MethodGet:
+		out := []map[string]any{}
+		for i := len(f.tokens) - 1; i >= 0; i-- {
+			if !revocado(f.tokens[i]) || r.URL.Query().Get("includeInactive") == "true" {
+				out = append(out, f.tokens[i])
+			}
+		}
+		responder(w, 200, map[string]any{"tokens": out})
+	case strings.HasPrefix(ruta, "/v1/tokens/") && accion == "revoke" && r.Method == http.MethodPost:
+		id := strings.TrimPrefix(ruta, "/v1/tokens/")
+		for _, t := range f.tokens {
+			if t["id"] == id {
+				t["revokedAt"] = "2026-11-09T12:00:00Z"
+				responder(w, 200, map[string]any{"token": t})
+				return true
+			}
+		}
+		errorGateway(w, 404, "NOT_FOUND", "token no encontrado")
+	default:
+		return false
+	}
+	return true
 }
 
 func issueFalso(n int, titulo, statusID, state, prio string) map[string]any {
@@ -225,6 +319,9 @@ func (f *falso) api(w http.ResponseWriter, r *http.Request, cuerpo []byte) {
 	}
 	if f.errorAPI != nil {
 		errorGateway(w, f.errorAPI.status, f.errorAPI.code, f.errorAPI.msg)
+		return
+	}
+	if f.actoresTokens(w, r, cuerpo) {
 		return
 	}
 	partes := strings.Split(strings.Trim(r.URL.Path, "/"), "/")

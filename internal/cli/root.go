@@ -106,7 +106,7 @@ func Ejecutar(ctx context.Context, args []string, ent Entorno) int {
 func (a *app) raiz() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "tk",
-		Short:         "Tekitla desde la terminal: proyectos e issues",
+		Short:         "Tekitla desde la terminal: proyectos, issues, agentes y tokens",
 		Long:          "tk es la CLI de Tekitla. Usa --json para una salida estable (agentes y scripts).",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -131,6 +131,10 @@ func (a *app) raiz() *cobra.Command {
 		a.cmdIssue(),
 		a.cmdMover(),
 		a.cmdComentar(),
+		a.cmdAgentes(),
+		a.cmdAgente(),
+		a.cmdTokens(),
+		a.cmdToken(),
 		a.cmdVersion(),
 	)
 	return root
