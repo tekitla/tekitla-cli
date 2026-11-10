@@ -349,6 +349,9 @@ func TestNoSeFiltranTokens(t *testing.T) {
 		{"mover", "DP-1", "Inexistente"},
 		{"comentar", "DP-1", "hola"},
 		{"issue", "DP-99"},
+		{"agentes"},
+		{"tokens"},
+		{"token", "revocar", "t-nada"},
 		{"version"},
 	}
 	for _, c := range comandos {
