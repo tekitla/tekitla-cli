@@ -81,6 +81,23 @@ tk comentar TK-42 "Hecho en tekitla-cli#1" --json
 - Código `1` con `"code": "ESTADO_DESCONOCIDO"`: el error trae
   `estados_validos`; elige uno de esos.
 - `--ambiente qa` (o `TK_AMBIENTE=qa`) para probar contra QA; prod por defecto.
+  `tk version` muestra el ambiente **por defecto**, no el del último comando.
+
+## Ambiente visible (v0.2.1, issue 037)
+
+- Las respuestas que escriben (agente nuevo/revocar, token nuevo/revocar)
+  empiezan con `[qa] ` o `[prod] ` y, con `--json`, traen `ambiente`
+  (`tk agentes` y `tk tokens` no lo llevan por elemento). Con `TK_API_URL`
+  o `[api] url`, el prefijo de texto es esa URL; el campo `ambiente` del
+  JSON sigue siendo `qa` o `prod` (es el valor del contrato). `tk issue
+  nuevo`, `tk mover` y `tk comentar` todavía no lo llevan (fuera del 037).
+- Los comandos que tk sugiere y dependen del ambiente (agentes, tokens)
+  pasan por `app.sugerir`: agrega `--ambiente` si no es prod o vino en el
+  flag. Una sugerencia nueva de ese tipo va por ahí, con su test
+  (`TestAgenteNuevoSugiereElAmbiente`, `TestRespuestasDicenElAmbiente`).
+  «corre tk login» no lo lleva: la sesión es la misma en los dos ambientes
+  (un solo proyecto de Firebase y un solo almacén). `sugerir` no repite
+  `TK_API_URL` (no hay flag para la URL; solo es para desarrollo).
 
 ## Agentes, tokens y MCP (v0.2, issue 030)
 
