@@ -158,6 +158,27 @@ func (a *app) api() *api.Cliente {
 	return a.cliente
 }
 
+// sugerir agrega --ambiente a un comando sugerido cuando este comando no
+// corrió en prod o vino con --ambiente (issue 037): copiado tal cual, va al
+// mismo ambiente aunque la otra terminal no tenga TK_AMBIENTE.
+func (a *app) sugerir(comando string) string {
+	if a.flagAmbiente == "" && a.cfg.Ambiente == config.AmbienteProd {
+		return comando
+	}
+	return comando + " --ambiente " + a.cfg.Ambiente
+}
+
+// etiqueta es el prefijo de las respuestas que escriben datos: «[qa] ». Si
+// TK_API_URL o [api] url pisan la URL del ambiente, dice esa URL: el dato
+// fue ahí, no al ambiente. (sugerir no puede repetir ese override: no hay
+// flag para la URL y solo se usa en desarrollo.)
+func (a *app) etiqueta() string {
+	if u, ok := config.URLAPI(a.cfg.Ambiente); ok && u != a.cfg.APIURL {
+		return "[" + a.cfg.APIURL + "] "
+	}
+	return "[" + a.cfg.Ambiente + "] "
+}
+
 func version() string {
 	if Version != "dev" {
 		return Version

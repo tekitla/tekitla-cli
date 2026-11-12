@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tekitla/tekitla-cli/internal/api"
+	"github.com/tekitla/tekitla-cli/internal/config"
 )
 
 // eventosEnDetalle: cuántos eventos recientes muestra tk issue.
@@ -457,15 +458,30 @@ func (a *app) cmdComentar() *cobra.Command {
 func (a *app) cmdVersion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Versión de tk y ambiente",
+		Short: "Versión de tk y ambiente por defecto",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			// El ambiente por defecto es el que usa un comando sin --ambiente
+			// (TK_AMBIENTE, config.toml o prod), no el del último comando.
+			// Sin el flag es a.cfg. Con el flag se resuelve aparte; si
+			// TK_AMBIENTE o config.toml traen algo inválido, version lo dice
+			// en vez de fallar (sin el flag, ya falló en PersistentPreRunE).
+			def := a.cfg
+			var errDef error
+			if a.flagAmbiente != "" {
+				def, errDef = config.Resolver("")
+			}
+			porDefecto := def.Ambiente // "" en el JSON si no es válido
+			if errDef != nil {
+				porDefecto = ""
+			}
 			v := map[string]string{
-				"version":  version(),
-				"commit":   Commit,
-				"fecha":    Fecha,
-				"ambiente": a.cfg.Ambiente,
-				"api":      a.cfg.APIURL,
+				"version":              version(),
+				"commit":               Commit,
+				"fecha":                Fecha,
+				"ambiente":             a.cfg.Ambiente,
+				"api":                  a.cfg.APIURL,
+				"ambiente_por_defecto": porDefecto,
 			}
 			if a.json {
 				escribirJSON(a.ent.Out, v)
@@ -475,7 +491,15 @@ func (a *app) cmdVersion() *cobra.Command {
 			if Commit != "" {
 				extra = " (" + Commit + ")"
 			}
-			fmt.Fprintf(a.ent.Out, "tk %s%s\nambiente: %s (%s)\n", version(), extra, a.cfg.Ambiente, a.cfg.APIURL)
+			fmt.Fprintf(a.ent.Out, "tk %s%s\n", version(), extra)
+			if errDef != nil {
+				fmt.Fprintf(a.ent.Out, "ambiente por defecto: no válido (%v)\n", errDef)
+			} else {
+				fmt.Fprintf(a.ent.Out, "ambiente por defecto: %s (%s)\n", def.Ambiente, def.APIURL)
+			}
+			if errDef != nil || a.cfg.Ambiente != def.Ambiente || a.cfg.APIURL != def.APIURL {
+				fmt.Fprintf(a.ent.Out, "con --ambiente: %s (%s)\n", a.cfg.Ambiente, a.cfg.APIURL)
+			}
 			return nil
 		},
 	}

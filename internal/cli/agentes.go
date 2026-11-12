@@ -66,6 +66,8 @@ type agenteJSON struct {
 	Herramienta string `json:"herramienta"`
 	Creado      string `json:"creado"`
 	Revocado    string `json:"revocado,omitempty"`
+	// Ambiente: solo en las respuestas que escriben (agente nuevo/revocar).
+	Ambiente string `json:"ambiente,omitempty"`
 }
 
 type tokenJSON struct {
@@ -81,12 +83,16 @@ type tokenJSON struct {
 	Estado    string   `json:"estado"` // activo, vencido o revocado
 	// EsPersona: el token es de la persona misma, no de un agente.
 	EsPersona bool `json:"es_persona"`
+	// Ambiente: solo en tk token revocar (en token nuevo va arriba).
+	Ambiente string `json:"ambiente,omitempty"`
 }
 
 type tokenNuevoJSON struct {
 	Token   tokenJSON `json:"token"`
 	Secreto string    `json:"secreto"`
 	Aviso   string    `json:"aviso"`
+	// Ambiente donde se creó el token (qa o prod).
+	Ambiente string `json:"ambiente"`
 }
 
 const avisoUnaVez = "Este token no se vuelve a mostrar: guárdalo ahora (p. ej. en la variable de entorno de usuario TRACKER_TOKEN). Nunca en un archivo del repo."
@@ -170,7 +176,7 @@ func (a *app) agentePorNombre(ctx context.Context, nombre string) (api.Actor, er
 		vigentes = append(vigentes, ac.DisplayName)
 	}
 	if len(vigentes) == 0 {
-		return api.Actor{}, usoErr("no hay un agente %q: no tienes agentes vigentes (tk agente nuevo)", nombre)
+		return api.Actor{}, usoErr("no hay un agente %q: no tienes agentes vigentes (%s)", nombre, a.sugerir("tk agente nuevo"))
 	}
 	return api.Actor{}, usoErr("no hay un agente %q; agentes: %s", nombre, strings.Join(vigentes, ", "))
 }
@@ -220,7 +226,7 @@ func (a *app) cmdAgentes() *cobra.Command {
 				return nil
 			}
 			if len(out) == 0 {
-				fmt.Fprintln(a.ent.Out, "No tienes agentes. Crea uno con tk agente nuevo \"<nombre>\" --herramienta claude-code.")
+				fmt.Fprintf(a.ent.Out, "No tienes agentes. Crea uno con %s.\n", a.sugerir(`tk agente nuevo "<nombre>" --herramienta claude-code`))
 				return nil
 			}
 			filas := make([][]string, 0, len(out))
@@ -272,12 +278,14 @@ func (a *app) cmdAgenteNuevo() *cobra.Command {
 				return err
 			}
 			g := agenteDe(ag)
+			g.Ambiente = a.cfg.Ambiente
 			if a.json {
 				escribirJSON(a.ent.Out, g)
 				return nil
 			}
-			fmt.Fprintf(a.ent.Out, "Agente %q creado (%s, id %s). Sácale un token con:\n  tk token nuevo --agente %q --permiso issues:read\n",
-				g.Nombre, g.Herramienta, g.ID, g.Nombre)
+			fmt.Fprintf(a.ent.Out, "%sAgente %q creado (%s, id %s). Sácale un token con:\n  %s\n",
+				a.etiqueta(), g.Nombre, g.Herramienta, g.ID,
+				a.sugerir(fmt.Sprintf("tk token nuevo --agente %q --permiso issues:read", g.Nombre)))
 			return nil
 		},
 	}
@@ -303,11 +311,12 @@ func (a *app) cmdAgenteRevocar() *cobra.Command {
 				return err
 			}
 			g := agenteDe(rev)
+			g.Ambiente = a.cfg.Ambiente
 			if a.json {
 				escribirJSON(a.ent.Out, g)
 				return nil
 			}
-			fmt.Fprintf(a.ent.Out, "Agente %q revocado, con todos sus tokens.\n", g.Nombre)
+			fmt.Fprintf(a.ent.Out, "%sAgente %q revocado, con todos sus tokens.\n", a.etiqueta(), g.Nombre)
 			return nil
 		},
 	}
@@ -341,7 +350,7 @@ func (a *app) cmdTokens() *cobra.Command {
 				return nil
 			}
 			if len(out) == 0 {
-				fmt.Fprintln(a.ent.Out, "No hay tokens. Crea uno con tk token nuevo --agente \"<nombre>\" --permiso issues:read.")
+				fmt.Fprintf(a.ent.Out, "No hay tokens. Crea uno con %s.\n", a.sugerir(`tk token nuevo --agente "<nombre>" --permiso issues:read`))
 				return nil
 			}
 			filas := make([][]string, 0, len(out))
@@ -429,17 +438,17 @@ func (a *app) cmdTokenNuevo() *cobra.Command {
 				return err
 			}
 			if secreto == "" {
-				return fmt.Errorf("la API no devolvió el token (id %s): revócalo con tk token revocar %s y crea otro", tok.ID, tok.ID)
+				return fmt.Errorf("la API no devolvió el token (id %s): revócalo con %s y crea otro", tok.ID, a.sugerir("tk token revocar "+tok.ID))
 			}
 			j := a.tokenDe(tok, map[string]string{ag.ID: ag.DisplayName})
 			if a.json {
-				escribirJSON(a.ent.Out, tokenNuevoJSON{Token: j, Secreto: secreto, Aviso: avisoUnaVez})
+				escribirJSON(a.ent.Out, tokenNuevoJSON{Token: j, Secreto: secreto, Aviso: avisoUnaVez, Ambiente: a.cfg.Ambiente})
 				return nil
 			}
 			// El aviso y los datos a stderr; stdout solo el token, para poder
 			// capturarlo sin copiarlo a mano.
-			fmt.Fprintf(a.ent.Err, "Token %s para %q (%s), vence %s.\n%s\n",
-				j.ID, j.Agente, strings.Join(j.Permisos, ", "), j.Vence, avisoUnaVez)
+			fmt.Fprintf(a.ent.Err, "%sToken %s para %q (%s), vence %s.\n%s\n",
+				a.etiqueta(), j.ID, j.Agente, strings.Join(j.Permisos, ", "), j.Vence, avisoUnaVez)
 			fmt.Fprintln(a.ent.Out, secreto)
 			return nil
 		},
@@ -461,7 +470,7 @@ func (a *app) cmdTokenRevocar() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
 			if id == "" || pareceToken(id) {
-				return usoErr("usa el id del token (columna ID de tk tokens), no su valor")
+				return usoErr("usa el id del token (columna ID de %s), no su valor", a.sugerir("tk tokens"))
 			}
 			ctx := cmd.Context()
 			tok, err := a.api().RevocarToken(ctx, id)
@@ -475,11 +484,12 @@ func (a *app) cmdTokenRevocar() *cobra.Command {
 			nombres, personas := nombresActores(actores)
 			j := a.tokenDe(tok, nombres)
 			j.EsPersona = personas[tok.ActorID]
+			j.Ambiente = a.cfg.Ambiente
 			if a.json {
 				escribirJSON(a.ent.Out, j)
 				return nil
 			}
-			fmt.Fprintf(a.ent.Out, "Token %s revocado. El gateway puede aceptarlo hasta 60 s más.\n", j.ID)
+			fmt.Fprintf(a.ent.Out, "%sToken %s revocado. El gateway puede aceptarlo hasta 60 s más.\n", a.etiqueta(), j.ID)
 			return nil
 		},
 	}

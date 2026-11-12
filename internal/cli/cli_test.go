@@ -506,7 +506,7 @@ func TestComentar(t *testing.T) {
 func TestVersionNoTocaLaRed(t *testing.T) {
 	a := nuevoArnes(t)
 	r := a.correr("version")
-	if r.codigo != 0 || !strings.Contains(r.out, "ambiente: prod") {
+	if r.codigo != 0 || !strings.Contains(r.out, "ambiente por defecto: prod") {
 		t.Fatalf("código %d out=%q", r.codigo, r.out)
 	}
 	if len(a.f.pedidos) != 0 {
@@ -524,3 +524,36 @@ func TestErrorDeUso(t *testing.T) {
 }
 
 func esWindowsTest() bool { return runtime.GOOS == "windows" }
+
+// Issue 037: tk version dice el ambiente por defecto (el de un comando sin
+// --ambiente), no el del último comando.
+func TestVersionAmbientePorDefecto(t *testing.T) {
+	a := nuevoArnes(t)
+	t.Setenv("TK_AMBIENTE", "qa")
+	r := a.correr("version")
+	if !strings.Contains(r.out, "ambiente por defecto: qa (https://api-qa.tekitla.victorrb1015.com)") || strings.Contains(r.out, "con --ambiente") {
+		t.Fatalf("version = %q", r.out)
+	}
+	r = a.correr("version", "--ambiente", "prod")
+	if !strings.Contains(r.out, "ambiente por defecto: qa") || !strings.Contains(r.out, "con --ambiente: prod (https://api.tekitla.victorrb1015.com)") {
+		t.Fatalf("version --ambiente prod = %q", r.out)
+	}
+	got := decodificar[map[string]string](t, a.correr("version", "--ambiente", "prod", "--json").out)
+	if got["ambiente_por_defecto"] != "qa" || got["ambiente"] != "prod" || got["api"] != "https://api.tekitla.victorrb1015.com" {
+		t.Fatalf("version --json = %v", got)
+	}
+}
+
+// Con TK_AMBIENTE inválido, tk version --ambiente prod no falla: lo dice.
+func TestVersionAmbientePorDefectoInvalido(t *testing.T) {
+	a := nuevoArnes(t)
+	t.Setenv("TK_AMBIENTE", "staging")
+	r := a.correr("version", "--ambiente", "prod")
+	if r.codigo != 0 || !strings.Contains(r.out, "ambiente por defecto: no válido") || !strings.Contains(r.out, "staging") {
+		t.Fatalf("código %d out=%q err=%q", r.codigo, r.out, r.err)
+	}
+	got := decodificar[map[string]string](t, a.correr("version", "--ambiente", "prod", "--json").out)
+	if got["ambiente_por_defecto"] != "" || got["ambiente"] != "prod" {
+		t.Fatalf("version --json = %v", got)
+	}
+}

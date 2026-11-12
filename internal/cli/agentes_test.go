@@ -204,3 +204,115 @@ func TestAgentesSinSesion(t *testing.T) {
 		t.Fatalf("sin sesión llegaron %d pedidos a la API", n)
 	}
 }
+
+// CU-037-1: la sugerencia de tk agente nuevo repite --ambiente qa; copiada
+// tal cual, el token se crea en el mismo ambiente.
+func TestAgenteNuevoSugiereElAmbiente(t *testing.T) {
+	casos := []struct {
+		nombre string
+		env    string
+		args   []string
+		quiero string
+		host   string
+	}{
+		{"flag qa", "", []string{"--ambiente", "qa"},
+			`tk token nuevo --agente "X" --permiso issues:read --ambiente qa`, "api-qa.tekitla.victorrb1015.com"},
+		{"env qa", "qa", nil,
+			`tk token nuevo --agente "X" --permiso issues:read --ambiente qa`, "api-qa.tekitla.victorrb1015.com"},
+		// Con TK_AMBIENTE=qa en esta terminal, --ambiente prod se repite: en
+		// otra terminal sin la variable daría igual, aquí no.
+		{"flag prod pisa env", "qa", []string{"--ambiente", "prod"},
+			`tk token nuevo --agente "X" --permiso issues:read --ambiente prod`, "api.tekitla.victorrb1015.com"},
+		{"default prod", "", nil,
+			`tk token nuevo --agente "X" --permiso issues:read` + "\n", "api.tekitla.victorrb1015.com"},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			a := nuevoArnes(t)
+			t.Setenv("TK_AMBIENTE", c.env)
+			a.conSesion()
+			r := a.correr(append([]string{"agente", "nuevo", "X", "--herramienta", "otra"}, c.args...)...)
+			if r.codigo != 0 {
+				t.Fatalf("código %d: %s", r.codigo, r.err)
+			}
+			if !strings.Contains(r.out, c.quiero) {
+				t.Fatalf("salida = %q, quiero la sugerencia %q", r.out, c.quiero)
+			}
+			for _, p := range a.pedidosAPI() {
+				if p.Host != c.host {
+					t.Errorf("llamó a %s, quiero %s", p.Host, c.host)
+				}
+			}
+		})
+	}
+}
+
+// CU-037-2: las respuestas que escriben dicen en qué ambiente fue, en texto
+// («[qa] …») y con --json (campo ambiente).
+func TestRespuestasDicenElAmbiente(t *testing.T) {
+	a := nuevoArnes(t)
+	a.conSesion()
+	qa := []string{"--ambiente", "qa"}
+	correr := func(args ...string) resultado {
+		t.Helper()
+		r := a.correr(append(args, qa...)...)
+		if r.codigo != 0 {
+			t.Fatalf("%v: código %d: %s", args, r.codigo, r.err)
+		}
+		return r
+	}
+
+	if r := correr("agente", "nuevo", "X", "--herramienta", "otra"); !strings.HasPrefix(r.out, `[qa] Agente "X" creado`) {
+		t.Errorf("agente nuevo: %q", r.out)
+	}
+	if g := decodificar[agenteJSON](t, correr("agente", "nuevo", "Y", "--herramienta", "otra", "--json").out); g.Ambiente != "qa" {
+		t.Errorf("agente nuevo --json: %+v", g)
+	}
+
+	r := correr("token", "nuevo", "--agente", "X", "--permiso", "issues:read")
+	if !strings.HasPrefix(r.err, "[qa] Token ") || strings.TrimSpace(r.out) != secretoToken {
+		t.Errorf("token nuevo: out=%q err=%q", r.out, r.err)
+	}
+	r = correr("token", "nuevo", "--agente", "X", "--permiso", "issues:read", "--json")
+	if nt := decodificar[tokenNuevoJSON](t, r.out); nt.Ambiente != "qa" || nt.Secreto != secretoToken {
+		t.Errorf("token nuevo --json: %+v", nt)
+	}
+	if !strings.Contains(r.out, `"ambiente": "qa"`) {
+		t.Errorf("token nuevo --json sin \"ambiente\": \"qa\": %s", r.out)
+	}
+
+	toks := decodificar[[]tokenJSON](t, correr("tokens", "--json").out)
+	if len(toks) < 2 || toks[0].Ambiente != "" {
+		t.Fatalf("tk tokens no lleva ambiente por token: %+v", toks)
+	}
+	if r := correr("token", "revocar", toks[0].ID); !strings.HasPrefix(r.out, "[qa] Token "+toks[0].ID+" revocado") {
+		t.Errorf("token revocar: %q", r.out)
+	}
+	if j := decodificar[tokenJSON](t, correr("token", "revocar", toks[1].ID, "--json").out); j.Ambiente != "qa" {
+		t.Errorf("token revocar --json: %+v", j)
+	}
+
+	if r := correr("agente", "revocar", "Y"); !strings.HasPrefix(r.out, `[qa] Agente "Y" revocado`) {
+		t.Errorf("agente revocar: %q", r.out)
+	}
+	if g := decodificar[agenteJSON](t, correr("agente", "revocar", "X", "--json").out); g.Ambiente != "qa" {
+		t.Errorf("agente revocar --json: %+v", g)
+	}
+
+	for _, p := range a.pedidosAPI() {
+		if p.Host != "api-qa.tekitla.victorrb1015.com" {
+			t.Errorf("llamó a %s", p.Host)
+		}
+	}
+}
+
+// Con TK_API_URL la etiqueta dice la URL a la que fue, no el ambiente.
+func TestEtiquetaConURLPisada(t *testing.T) {
+	a := nuevoArnes(t)
+	t.Setenv("TK_API_URL", "https://api-qa.tekitla.victorrb1015.com")
+	a.conSesion()
+	r := a.correr("agente", "nuevo", "X", "--herramienta", "otra")
+	if r.codigo != 0 || !strings.HasPrefix(r.out, `[https://api-qa.tekitla.victorrb1015.com] Agente "X" creado`) {
+		t.Fatalf("código %d out=%q err=%q", r.codigo, r.out, r.err)
+	}
+}
